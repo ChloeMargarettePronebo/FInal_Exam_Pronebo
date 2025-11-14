@@ -1,0 +1,32 @@
+---
+- name: Deploy Services and Monitoring tool
+  hosts: all
+  become: yes
+  vars_files:
+    - ../config.yaml
+
+  tasks:
+
+    - name: Run Enterprise Service container
+      docker_container:
+        name: "{{ enterprise_service.name }}"
+        image: "{{ enterprise_service.name }}:{{ enterprise_service.version }}"
+        state: started
+        restart_policy: always
+        ports:
+          - "80:80"
+
+    - name: Run Monitoring Tool container
+      docker_container:
+        name: "{{ monitoring_tool.name }}"
+        image: "prom/prometheus:{{ monitoring_tool.version }}"
+        state: started
+        restart_policy: always
+    
+    - name: Change MOTD
+      copy:
+        dest: /etc/motd
+        content: |
+          Ansible Managed by {{ username }}
+          Services running: {{ enterprise_service.name }}, {{ monitoring_tool.name }}
+
