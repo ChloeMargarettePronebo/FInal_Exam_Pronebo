@@ -1,32 +1,74 @@
 ---
-- name: Deploy Services and Monitoring tool
-  hosts: all
-  become: yes
-  vars_files:
-    - ../config.yaml
+-hosts: all
+ become: yes
+ vars_files:
+   - ../config.yaml
 
-  tasks:
+ tasks:
 
-    - name: Run Enterprise Service container
-      docker_container:
-        name: "{{ enterprise_service.name }}"
-        image: "{{ enterprise_service.name }}:{{ enterprise_service.version }}"
+   - name: Install Apache Web Server (Debian)
+     package:
+       name: "{{ enterprise_service.debian }}"
+       state: present
+      when: ansible distribution == "Debian"
+
+    - name: Install Apache Web Server (CentOS)
+      package:
+        name: "{{ enterprise_service.centos }}"
+        state: present
+      when: ansible_distribution == "CentOS"
+
+    - name: Ensure Apache is running
+      service:
+        name: "{{ 'apache2' if ansible_facts['os_family'] == 'Debian' else 'httpd' }}"
         state: started
-        restart_policy: always
-        ports:
-          - "80:80"
+        enabled: yes
 
-    - name: Run Monitoring Tool container
-      docker_container:
-        name: "{{ monitoring_tool.name }}"
-        image: "prom/prometheus:{{ monitoring_tool.version }}"
+    - name: Create node_exporter user
+      user:
+        name: node_exporter
+        shell: /usr/sbin/nologin
+
+    - name: Download Node Exporter
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ monitoring_tool.version }}/node_exporter-{{ monitoring_tool.version }}.linux-amd64.tar.gz"
+        dest: /tmp/node_exporter.tar.gz
+
+    - name: Extract Node Exporter
+      unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /usr/local/bin
+        remote_src: yes
+
+    - name: Move binary
+      command: mv /usr/local/bin/node_exporter-{{ monitoring_tool.version }}.linux-amd64/node_exporter /usr/local/bin/node_exporter
+      args:
+        creates: /usr/local/bin/node_exporter
+
+    - name: Create systemd service file for Node Exporter
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network.target
+
+          [Service]
+          User=node_exporter
+          ExecStart=/usr/local/bin/node_exporter
+
+          [Install]
+          WantedBy=default.target
+
+    - name: Enable and start Node Exporter
+      systemd:
+        name: node_exporter
         state: started
-        restart_policy: always
-    
-    - name: Change MOTD
+        enabled: yes
+
+    - name: Update MOTD
       copy:
         dest: /etc/motd
         content: |
           Ansible Managed by {{ username }}
-          Services running: {{ enterprise_service.name }}, {{ monitoring_tool.name }}
-
+          Services running: Apache, Node Exporter
